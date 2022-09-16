@@ -27,8 +27,10 @@ jobs:
         uses: docker/build-push-action@v3
         with:
           context: ./docker
+          build-args: |
+            TAILSCALE_TAG=${{ secrets.TAILSCALE_TAG }}
           platforms: linux/amd64
           push: true
           tags: |
             ${{ secrets.DOCKERHUB_USERNAME }}/tailscale-sr:latest
-            ${{ secrets.DOCKERHUB_USERNAME }}/tailscale-sr:v${{ github.run_number }}
+            ${{ secrets.DOCKERHUB_USERNAME }}/tailscale-sr:${{ secrets.TAILSCALE_TAG }}
