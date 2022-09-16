@@ -3,6 +3,9 @@ name: Docker Tailscale Container B&P
 on:
   workflow_dispatch:
 
+env:
+  TS_TAG: ${{ secrets.TAILSCALE_TAG }}
+
 jobs:
   docker:
     runs-on: ubuntu-latest
@@ -28,9 +31,9 @@ jobs:
         with:
           context: ./docker
           build-args: |
-            TAILSCALE_TAG=${{ secrets.TAILSCALE_TAG }}
+            TAILSCALE_TAG=$TS_TAG
           platforms: linux/amd64
           push: true
           tags: |
             ${{ secrets.DOCKERHUB_USERNAME }}/tailscale-sr:latest
-            ${{ secrets.DOCKERHUB_USERNAME }}/tailscale-sr:${{ secrets.TAILSCALE_TAG }}
+            ${{ secrets.DOCKERHUB_USERNAME }}/tailscale-sr:$TS_TAG
