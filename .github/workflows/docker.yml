@@ -10,6 +10,8 @@ jobs:
   docker:
     runs-on: ubuntu-latest
     steps:
+      - name: Build Information
+        run: echo "Building new tailscale-sr container from Tailscale/Tailscale:$TS_TAG"
       -
         name: Checkout
         uses: actions/checkout@v3
