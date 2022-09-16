@@ -3,15 +3,10 @@ name: Docker Tailscale Container B&P
 on:
   workflow_dispatch:
 
-env:
-  TS_TAG: ${{ secrets.TAILSCALE_TAG }}
-
 jobs:
   docker:
     runs-on: ubuntu-latest
     steps:
-      - name: Build Information
-        run: echo "Building new tailscale-sr container from Tailscale/Tailscale:${{ env.TS_TAG }}"
       -
         name: Checkout
         uses: actions/checkout@v3
@@ -33,9 +28,9 @@ jobs:
         with:
           context: ./docker
           build-args: |
-            TAILSCALE_TAG=$TS_TAG
+            TAILSCALE_TAG=${{ secrets.TAILSCALE_TAG }}
           platforms: linux/amd64
           push: true
           tags: |
             ${{ secrets.DOCKERHUB_USERNAME }}/tailscale-sr:latest
-            ${{ secrets.DOCKERHUB_USERNAME }}/tailscale-sr:${{ env.TS_TAG }}
+            ${{ secrets.DOCKERHUB_USERNAME }}/tailscale-sr:${{ secrets.TAILSCALE_TAG }}
