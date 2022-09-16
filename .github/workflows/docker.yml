@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Build Information
-        run: echo "Building new tailscale-sr container from Tailscale/Tailscale:$TS_TAG"
+        run: echo "Building new tailscale-sr container from Tailscale/Tailscale:${{ env.TS_TAG }}"
       -
         name: Checkout
         uses: actions/checkout@v3
@@ -38,4 +38,4 @@ jobs:
           push: true
           tags: |
             ${{ secrets.DOCKERHUB_USERNAME }}/tailscale-sr:latest
-            ${{ secrets.DOCKERHUB_USERNAME }}/tailscale-sr:$TS_TAG
+            ${{ secrets.DOCKERHUB_USERNAME }}/tailscale-sr:${{ env.TS_TAG }}
