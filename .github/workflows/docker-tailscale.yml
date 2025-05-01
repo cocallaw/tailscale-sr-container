@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: write  # Needed to commit version file
 
 jobs:
   check-and-build:
@@ -19,19 +19,26 @@ jobs:
       - name: Get latest Tailscale stable version
         id: tailscale
         run: |
-          IMAGE="tailscale/tailscale"
-          DIGEST=$(docker buildx imagetools inspect ${IMAGE}:stable | grep Digest | awk '{print $2}')
-          VERSION=$(docker buildx imagetools inspect ${IMAGE}@${DIGEST} | grep "org.opencontainers.image.version" | head -n1 | awk -F '"' '{print $4}')
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          VERSION=$(curl -s https://registry.hub.docker.com/v2/repositories/tailscale/tailscale/tags/?page_size=100 \
+            | jq -r '.results[].name' \
+            | grep -E '^v[0-9]+\.[0-9]+(\.[0-9]+)?$' \
+            | sort -V \
+            | tail -n1)
+          echo "Latest stable version: $VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Check if version already published
+      - name: Debug version
+        run: |
+            echo "Detected Tailscale version: ${{ steps.tailscale.outputs.version }}"
+
+      - name: Check if image with version already exists
         id: check
         run: |
           if docker manifest inspect ${{ secrets.DOCKERHUB_USERNAME }}/tailscale-sr:${{ steps.tailscale.outputs.version }} > /dev/null 2>&1; then
-            echo "Already built"
+            echo "Image already exists. Skipping build."
             echo "build_needed=false" >> $GITHUB_OUTPUT
           else
-            echo "New version"
+            echo "New version. Proceeding to build."
             echo "build_needed=true" >> $GITHUB_OUTPUT
           fi
 
@@ -63,7 +70,7 @@ jobs:
             ${{ secrets.DOCKERHUB_USERNAME }}/tailscale-sr:latest
             ${{ secrets.DOCKERHUB_USERNAME }}/tailscale-sr:${{ steps.tailscale.outputs.version }}
 
-      - name: Commit version file
+      - name: Commit updated version file
         if: steps.check.outputs.build_needed == 'true'
         run: |
           echo "${{ steps.tailscale.outputs.version }}" > tailscale-version.txt
