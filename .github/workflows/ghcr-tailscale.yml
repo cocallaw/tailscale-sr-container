@@ -17,6 +17,14 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v3
 
+      - name: Create tests directory and update gitignore
+        run: |
+          mkdir -p tests
+          if ! grep -q "^tests/$" .gitignore 2>/dev/null; then
+            echo "tests/" >> .gitignore
+            git add .gitignore
+          fi
+
       - name: Get latest Tailscale stable version
         id: tailscale
         run: |
@@ -96,7 +104,6 @@ jobs:
       - name: Run container structure tests
         if: steps.check.outputs.build_needed == 'true'
         run: |
-          mkdir -p tests
           cat > tests/container-structure-test.yaml << 'EOF'
           schemaVersion: 2.0.0
           fileExistenceTests:
@@ -126,6 +133,11 @@ jobs:
           docker stop $CONTAINER_ID
           docker rm $CONTAINER_ID
       # === End Verification Steps ===
+
+      - name: Clean up test directory
+        if: steps.check.outputs.build_needed == 'true'
+        run: |
+          rm -rf tests
 
       - name: Commit updated version file
         if: steps.check.outputs.build_needed == 'true'
