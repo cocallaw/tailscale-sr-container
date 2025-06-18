@@ -1,0 +1,138 @@
+name: Auto Build & Publish Tailscale Container to GHCR
+
+on:
+  schedule:
+    - cron: '0 0 */3 * *'  # Every 3 days at 00:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write  # Needed to commit version file
+  packages: write  # Needed for GHCR push
+
+jobs:
+  check-and-build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Get latest Tailscale stable version
+        id: tailscale
+        run: |
+          VERSION=$(curl -s https://registry.hub.docker.com/v2/repositories/tailscale/tailscale/tags/?page_size=100 \
+            | jq -r '.results[].name' \
+            | grep -E '^v[0-9]+\.[0-9]+(\.[0-9]+)?$' \
+            | sort -V \
+            | tail -n1)
+          echo "Latest stable version: $VERSION"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Debug version
+        run: |
+            echo "Detected Tailscale version: ${{ steps.tailscale.outputs.version }}"
+
+      - name: Check if image with version already exists
+        id: check
+        run: |
+          # Extract GitHub username or org from the repository name
+          REPO_OWNER=$(echo ${{ github.repository }} | cut -d '/' -f 1)
+          IMAGE_NAME="ghcr.io/${{ github.repository_owner }}/tailscale-sr:${{ steps.tailscale.outputs.version }}"
+          
+          echo "Checking if image exists: $IMAGE_NAME"
+          
+          # Try to inspect the image, redirect errors to /dev/null
+          if docker manifest inspect $IMAGE_NAME > /dev/null 2>&1; then
+            echo "Image already exists. Skipping build."
+            echo "build_needed=false" >> $GITHUB_OUTPUT
+          else
+            echo "New version. Proceeding to build."
+            echo "build_needed=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Set up QEMU
+        if: steps.check.outputs.build_needed == 'true'
+        uses: docker/setup-qemu-action@v2
+
+      - name: Set up Docker Buildx
+        if: steps.check.outputs.build_needed == 'true'
+        uses: docker/setup-buildx-action@v2
+
+      - name: Login to GitHub Container Registry
+        if: steps.check.outputs.build_needed == 'true'
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push multi-arch container
+        if: steps.check.outputs.build_needed == 'true'
+        uses: docker/build-push-action@v3
+        with:
+          context: ./docker
+          build-args: |
+            TAILSCALE_TAG=${{ steps.tailscale.outputs.version }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/tailscale-sr:latest
+            ghcr.io/${{ github.repository_owner }}/tailscale-sr:${{ steps.tailscale.outputs.version }}
+
+      # === Begin Verification Steps ===
+      - name: Pull built container for testing
+        if: steps.check.outputs.build_needed == 'true'
+        run: |
+          docker pull ghcr.io/${{ github.repository_owner }}/tailscale-sr:${{ steps.tailscale.outputs.version }}
+          docker image inspect ghcr.io/${{ github.repository_owner }}/tailscale-sr:${{ steps.tailscale.outputs.version }}
+
+      - name: Install container-structure-test
+        if: steps.check.outputs.build_needed == 'true'
+        run: |
+          curl -LO https://storage.googleapis.com/container-structure-test/latest/container-structure-test-linux-amd64
+          chmod +x container-structure-test-linux-amd64
+          sudo mv container-structure-test-linux-amd64 /usr/local/bin/container-structure-test
+
+      - name: Run container structure tests
+        if: steps.check.outputs.build_needed == 'true'
+        run: |
+          mkdir -p tests
+          cat > tests/container-structure-test.yaml << 'EOF'
+          schemaVersion: 2.0.0
+          fileExistenceTests:
+          - name: 'Tailscale Entrypoint Script'
+            path: '/usr/local/bin/tailscale-entrypoint.sh'
+            shouldExist: true
+            permissions: '-rwxr-xr-x'
+          commandTests:
+          - name: 'Tailscale Binary Present'
+            command: 'which'
+            args: ['tailscale']
+            expectedOutput: ['/usr/local/bin/tailscale']
+          - name: 'Tailscaled Binary Present'
+            command: 'which'
+            args: ['tailscaled']
+            expectedOutput: ['/usr/local/bin/tailscaled']
+          EOF
+          container-structure-test test --image ghcr.io/${{ github.repository_owner }}/tailscale-sr:${{ steps.tailscale.outputs.version }} --config tests/container-structure-test.yaml
+
+      - name: Verify container entrypoint script (basic)
+        if: steps.check.outputs.build_needed == 'true'
+        run: |
+          # We can only do a basic verification since we don't have real credentials
+          CONTAINER_ID=$(docker run -d --entrypoint "/bin/sh" ghcr.io/${{ github.repository_owner }}/tailscale-sr:${{ steps.tailscale.outputs.version }} -c "sleep 30")
+          docker exec $CONTAINER_ID sh -c "test -x /usr/local/bin/tailscale-entrypoint.sh && echo 'Entrypoint script exists and is executable'"
+          docker exec $CONTAINER_ID sh -c "grep -q 'TAILSCALE_HOSTNAME' /usr/local/bin/tailscale-entrypoint.sh && echo 'Script contains expected environment variables'"
+          docker stop $CONTAINER_ID
+          docker rm $CONTAINER_ID
+      # === End Verification Steps ===
+
+      - name: Commit updated version file
+        if: steps.check.outputs.build_needed == 'true'
+        run: |
+          echo "${{ steps.tailscale.outputs.version }}" > tailscale-version.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add tailscale-version.txt
+          git commit -m "Update Tailscale version to ${{ steps.tailscale.outputs.version }}"
+          git push
